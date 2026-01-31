@@ -1,0 +1,300 @@
+name: Validate Skills PR
+
+on:
+  pull_request:
+    paths:
+      - 'skills/**'
+      - 'validate-skill.sh'
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Skill Changes
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for proper diff
+      
+      - name: Get changed skill directories
+        id: changed-skills
+        run: |
+          # Get list of changed files in skills/ directory
+          git diff --name-only origin/${{ github.base_ref }}..HEAD | grep '^skills/' | cut -d'/' -f1-3 | sort -u > /tmp/changed_dirs.txt
+          
+          # Filter to only actual skill directories (containing SKILL.md or LICENSE.txt)
+          SKILLS=""
+          while IFS= read -r dir; do
+            if [ -d "$dir" ]; then
+              SKILLS="$SKILLS $dir"
+            fi
+          done < /tmp/changed_dirs.txt
+          
+          echo "skills=$SKILLS" >> $GITHUB_OUTPUT
+          echo "Changed skill directories: $SKILLS"
+      
+      - name: Validate changed skills
+        id: validate
+        run: |
+          SKILLS="${{ steps.changed-skills.outputs.skills }}"
+          
+          if [ -z "$SKILLS" ]; then
+            echo "No skill directories changed in this PR"
+            echo "result=no-changes" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Track worst outcome across all skills
+          WORST_EXIT=0
+          RESULTS=""
+          
+          for skill in $SKILLS; do
+            echo ""
+            echo "========================================"
+            echo "Validating: $skill"
+            echo "========================================"
+            
+            # Run validator and capture exit code
+            ./validate-skill.sh "$skill" | tee "/tmp/${skill//\//_}_validation.log"
+            EXIT_CODE=${PIPESTATUS[0]}
+            
+            echo "Exit code for $skill: $EXIT_CODE"
+            
+            # Track worst result
+            if [ $EXIT_CODE -gt $WORST_EXIT ]; then
+              WORST_EXIT=$EXIT_CODE
+            fi
+            
+            # Build results summary
+            case $EXIT_CODE in
+              0) RESULTS="$RESULTS\n- ✅ **$skill**: PASSED" ;;
+              1) RESULTS="$RESULTS\n- ⚠️  **$skill**: NEEDS CHANGES" ;;
+              2) RESULTS="$RESULTS\n- ❌ **$skill**: REJECTED" ;;
+              *) RESULTS="$RESULTS\n- ❓ **$skill**: UNKNOWN ERROR" ;;
+            esac
+          done
+          
+          echo "worst_exit=$WORST_EXIT" >> $GITHUB_OUTPUT
+          echo "results<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$RESULTS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Comment on PR - REJECTED
+        if: steps.validate.outputs.worst_exit == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = `${{ steps.validate.outputs.results }}`;
+            
+            // Find and read validation logs
+            let logs = '';
+            const skills = '${{ steps.changed-skills.outputs.skills }}'.split(' ');
+            for (const skill of skills) {
+              const logFile = `/tmp/${skill.replace(/\//g, '_')}_validation.log`;
+              if (fs.existsSync(logFile)) {
+                logs += `\n<details>\n<summary>📋 Validation log: ${skill}</summary>\n\n\`\`\`\n`;
+                logs += fs.readFileSync(logFile, 'utf8');
+                logs += '\n\`\`\`\n</details>\n';
+              }
+            }
+            
+            const comment = `## ❌ Skill Validation: REJECTED
+
+This PR has been automatically rejected due to **critical validation failures**.
+
+### Results by Skill
+${results}
+
+### Critical Issues Found
+One or more skills failed validation with critical errors such as:
+- **Security vulnerabilities** (prompt injection, dangerous commands)
+- **Missing required files** (SKILL.md, LICENSE.txt)
+- **Hardcoded credentials or secrets**
+
+### What You Need To Do
+1. Review the validation logs below
+2. Fix **all critical issues** identified
+3. Push your fixes to this PR
+4. Validation will run automatically again
+
+${logs}
+
+---
+*This PR cannot be merged until all critical issues are resolved.*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: Comment on PR - NEEDS CHANGES
+        if: steps.validate.outputs.worst_exit == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = `${{ steps.validate.outputs.results }}`;
+            
+            let logs = '';
+            const skills = '${{ steps.changed-skills.outputs.skills }}'.split(' ');
+            for (const skill of skills) {
+              const logFile = `/tmp/${skill.replace(/\//g, '_')}_validation.log`;
+              if (fs.existsSync(logFile)) {
+                logs += `\n<details>\n<summary>📋 Validation log: ${skill}</summary>\n\n\`\`\`\n`;
+                logs += fs.readFileSync(logFile, 'utf8');
+                logs += '\n\`\`\`\n</details>\n';
+              }
+            }
+            
+            const comment = `## ⚠️  Skill Validation: NEEDS CHANGES
+
+This PR has validation issues that need to be fixed before it can be reviewed.
+
+### Results by Skill
+${results}
+
+### Issues Found
+One or more skills have structural or formatting problems such as:
+- Missing required frontmatter fields (name, description, version, author)
+- Invalid semantic version format
+- Name mismatch between directory and frontmatter
+- Missing required sections (When to Use, Instructions)
+
+### What You Need To Do
+1. Review the validation logs below
+2. Fix the identified structural/format issues
+3. Push your fixes to this PR
+4. Validation will run automatically again
+
+${logs}
+
+---
+*These are fixable issues. Once resolved, this PR will be ready for human/AI review.*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: Comment on PR - PASSED
+        if: steps.validate.outputs.worst_exit == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = `${{ steps.validate.outputs.results }}`;
+            
+            let logs = '';
+            const skills = '${{ steps.changed-skills.outputs.skills }}'.split(' ');
+            for (const skill of skills) {
+              const logFile = `/tmp/${skill.replace(/\//g, '_')}_validation.log`;
+              if (fs.existsSync(logFile)) {
+                logs += `\n<details>\n<summary>📋 Validation log: ${skill}</summary>\n\n\`\`\`\n`;
+                logs += fs.readFileSync(logFile, 'utf8');
+                logs += '\n\`\`\`\n</details>\n';
+              }
+            }
+            
+            const comment = `## ✅ Skill Validation: PASSED
+
+All skills in this PR have passed automated validation!
+
+### Results by Skill
+${results}
+
+### Next Steps
+This PR is ready for:
+- **Human review** - A maintainer will review the skill content, quality, and usefulness
+- **AI review** (optional) - May be flagged for CLIO-assisted review for experimental skills
+
+${logs}
+
+---
+*Automated validation passed. Awaiting maintainer review.*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: Add labels
+        if: steps.validate.outputs.result != 'no-changes'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const exitCode = '${{ steps.validate.outputs.worst_exit }}';
+            const labels = [];
+            
+            // Remove old validation labels first
+            const oldLabels = ['validation-passed', 'needs-fixes', 'security-issue'];
+            for (const label of oldLabels) {
+              try {
+                await github.rest.issues.removeLabel({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label
+                });
+              } catch (e) {
+                // Label might not exist, that's fine
+              }
+            }
+            
+            // Add appropriate label based on result
+            switch(exitCode) {
+              case '0':
+                labels.push('validation-passed');
+                break;
+              case '1':
+                labels.push('needs-fixes');
+                break;
+              case '2':
+                labels.push('security-issue');
+                labels.push('needs-fixes');
+                break;
+            }
+            
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: labels
+              });
+            }
+      
+      - name: Set final status
+        if: always()
+        run: |
+          EXIT_CODE="${{ steps.validate.outputs.worst_exit }}"
+          
+          case $EXIT_CODE in
+            0)
+              echo "✅ All validations passed"
+              exit 0
+              ;;
+            1)
+              echo "⚠️  Validation failed - fixable issues found"
+              exit 1
+              ;;
+            2)
+              echo "❌ Validation rejected - critical failures"
+              exit 1
+              ;;
+            *)
+              echo "Validation had unexpected result"
+              exit 0
+              ;;
+          esac
