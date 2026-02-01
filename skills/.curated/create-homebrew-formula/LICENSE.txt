@@ -1,0 +1,4 @@
+GPL-3.0
+
+This skill is part of the CLIO project and is released under the GNU General Public License v3.0.
+See https://www.gnu.org/licenses/gpl-3.0.html for details.
