@@ -86,217 +86,117 @@ jobs:
           echo -e "$RESULTS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
       
+      
+      - name: Build validation logs
+        id: logs
+        if: steps.validate.outputs.result != 'no-changes'
+        run: |
+          SKILLS="${{ steps.changed-skills.outputs.skills }}"
+          mkdir -p /tmp/skill-logs
+          for skill in $SKILLS; do
+            log_file="/tmp/${skill//\//_}_validation.log"
+            if [ -f "$log_file" ]; then
+              cat "$log_file" >> /tmp/skill-logs/all_logs.txt
+              echo "---" >> /tmp/skill-logs/all_logs.txt
+            fi
+          done
+      
       - name: Comment on PR - REJECTED
         if: steps.validate.outputs.worst_exit == '2'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = `${{ steps.validate.outputs.results }}`;
-            
-            // Find and read validation logs
-            let logs = '';
-            const skills = '${{ steps.changed-skills.outputs.skills }}'.split(' ');
-            for (const skill of skills) {
-              const logFile = `/tmp/${skill.replace(/\//g, '_')}_validation.log`;
-              if (fs.existsSync(logFile)) {
-                logs += `\n<details>\n<summary>📋 Validation log: ${skill}</summary>\n\n\`\`\`\n`;
-                logs += fs.readFileSync(logFile, 'utf8');
-                logs += '\n\`\`\`\n</details>\n';
-              }
-            }
-            
-            const comment = `## ❌ Skill Validation: REJECTED
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESULTS: ${{ steps.validate.outputs.results }}
+        run: |
+          cat > /tmp/comment.md << 'COMMENT_EOF'
+          ## Skill Validation: REJECTED
 
-This PR has been automatically rejected due to **critical validation failures**.
+          This PR has been automatically rejected due to **critical validation failures**.
 
-### Results by Skill
-${results}
+          ### Critical Issues Found
+          One or more skills failed validation with critical errors such as:
+          - **Security vulnerabilities** (prompt injection, dangerous commands)
+          - **Missing required files** (SKILL.md, LICENSE.txt)
+          - **Hardcoded credentials or secrets**
 
-### Critical Issues Found
-One or more skills failed validation with critical errors such as:
-- **Security vulnerabilities** (prompt injection, dangerous commands)
-- **Missing required files** (SKILL.md, LICENSE.txt)
-- **Hardcoded credentials or secrets**
+          ### What You Need To Do
+          1. Review the validation logs in the Actions tab
+          2. Fix **all critical issues** identified
+          3. Push your fixes to this PR
+          4. Validation will run automatically again
 
-### What You Need To Do
-1. Review the validation logs below
-2. Fix **all critical issues** identified
-3. Push your fixes to this PR
-4. Validation will run automatically again
-
-${logs}
-
----
-*This PR cannot be merged until all critical issues are resolved.*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+          ---
+          *This PR cannot be merged until all critical issues are resolved.*
+          COMMENT_EOF
+          
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
       
       - name: Comment on PR - NEEDS CHANGES
         if: steps.validate.outputs.worst_exit == '1'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = `${{ steps.validate.outputs.results }}`;
-            
-            let logs = '';
-            const skills = '${{ steps.changed-skills.outputs.skills }}'.split(' ');
-            for (const skill of skills) {
-              const logFile = `/tmp/${skill.replace(/\//g, '_')}_validation.log`;
-              if (fs.existsSync(logFile)) {
-                logs += `\n<details>\n<summary>📋 Validation log: ${skill}</summary>\n\n\`\`\`\n`;
-                logs += fs.readFileSync(logFile, 'utf8');
-                logs += '\n\`\`\`\n</details>\n';
-              }
-            }
-            
-            const comment = `## ⚠️  Skill Validation: NEEDS CHANGES
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/comment.md << 'COMMENT_EOF'
+          ## Skill Validation: NEEDS CHANGES
 
-This PR has validation issues that need to be fixed before it can be reviewed.
+          This PR has validation issues that need to be fixed before it can be reviewed.
 
-### Results by Skill
-${results}
+          ### Issues Found
+          One or more skills have structural or formatting problems such as:
+          - Missing required frontmatter fields (name, description, version, author)
+          - Invalid semantic version format
+          - Name mismatch between directory and frontmatter
+          - Missing required sections (When to Use, Instructions)
 
-### Issues Found
-One or more skills have structural or formatting problems such as:
-- Missing required frontmatter fields (name, description, version, author)
-- Invalid semantic version format
-- Name mismatch between directory and frontmatter
-- Missing required sections (When to Use, Instructions)
+          ### What You Need To Do
+          1. Review the validation logs in the Actions tab
+          2. Fix the identified structural/format issues
+          3. Push your fixes to this PR
+          4. Validation will run automatically again
 
-### What You Need To Do
-1. Review the validation logs below
-2. Fix the identified structural/format issues
-3. Push your fixes to this PR
-4. Validation will run automatically again
-
-${logs}
-
----
-*These are fixable issues. Once resolved, this PR will be ready for human/AI review.*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+          ---
+          *These are fixable issues. Once resolved, this PR will be ready for human/AI review.*
+          COMMENT_EOF
+          
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
       
       - name: Comment on PR - PASSED
         if: steps.validate.outputs.worst_exit == '0'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = `${{ steps.validate.outputs.results }}`;
-            
-            let logs = '';
-            const skills = '${{ steps.changed-skills.outputs.skills }}'.split(' ');
-            for (const skill of skills) {
-              const logFile = `/tmp/${skill.replace(/\//g, '_')}_validation.log`;
-              if (fs.existsSync(logFile)) {
-                logs += `\n<details>\n<summary>📋 Validation log: ${skill}</summary>\n\n\`\`\`\n`;
-                logs += fs.readFileSync(logFile, 'utf8');
-                logs += '\n\`\`\`\n</details>\n';
-              }
-            }
-            
-            const comment = `## ✅ Skill Validation: PASSED
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/comment.md << 'COMMENT_EOF'
+          ## Skill Validation: PASSED
 
-All skills in this PR have passed automated validation!
+          All skills in this PR have passed automated validation!
 
-### Results by Skill
-${results}
+          ### Next Steps
+          This PR is ready for:
+          - **Human review** - A maintainer will review the skill content, quality, and usefulness
+          - **AI review** (optional) - May be flagged for CLIO-assisted review for experimental skills
 
-### Next Steps
-This PR is ready for:
-- **Human review** - A maintainer will review the skill content, quality, and usefulness
-- **AI review** (optional) - May be flagged for CLIO-assisted review for experimental skills
-
-${logs}
-
----
-*Automated validation passed. Awaiting maintainer review.*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+          ---
+          *Automated validation passed. Awaiting maintainer review.*
+          COMMENT_EOF
+          
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
       
       - name: Add labels
         if: steps.validate.outputs.result != 'no-changes'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const exitCode = '${{ steps.validate.outputs.worst_exit }}';
-            const labels = [];
-            
-            // Remove old validation labels first
-            const oldLabels = ['validation-passed', 'needs-fixes', 'security-issue'];
-            for (const label of oldLabels) {
-              try {
-                await github.rest.issues.removeLabel({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: label
-                });
-              } catch (e) {
-                // Label might not exist, that's fine
-              }
-            }
-            
-            // Add appropriate label based on result
-            switch(exitCode) {
-              case '0':
-                labels.push('validation-passed');
-                break;
-              case '1':
-                labels.push('needs-fixes');
-                break;
-              case '2':
-                labels.push('security-issue');
-                labels.push('needs-fixes');
-                break;
-            }
-            
-            if (labels.length > 0) {
-              await github.rest.issues.addLabels({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                labels: labels
-              });
-            }
-      
-      - name: Set final status
-        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           EXIT_CODE="${{ steps.validate.outputs.worst_exit }}"
           
-          case $EXIT_CODE in
-            0)
-              echo "✅ All validations passed"
-              exit 0
-              ;;
-            1)
-              echo "⚠️  Validation failed - fixable issues found"
-              exit 1
-              ;;
-            2)
-              echo "❌ Validation rejected - critical failures"
-              exit 1
-              ;;
-            *)
-              echo "Validation had unexpected result"
-              exit 0
-              ;;
+          gh pr edit ${{ github.event.pull_request.number }} --remove-label "validation-passed" 2>/dev/null || true
+          gh pr edit ${{ github.event.pull_request.number }} --remove-label "validation-needs-changes" 2>/dev/null || true
+          gh pr edit ${{ github.event.pull_request.number }} --remove-label "validation-rejected" 2>/dev/null || true
+          
+          case "$EXIT_CODE" in
+            0) gh pr edit ${{ github.event.pull_request.number }} --add-label "validation-passed" 2>/dev/null || true ;;
+            1) gh pr edit ${{ github.event.pull_request.number }} --add-label "validation-needs-changes" 2>/dev/null || true ;;
+            2) gh pr edit ${{ github.event.pull_request.number }} --add-label "validation-rejected" 2>/dev/null || true ;;
           esac
+      
+      - name: Fail on rejection
+        if: steps.validate.outputs.worst_exit == '2'
+        run: exit 1
