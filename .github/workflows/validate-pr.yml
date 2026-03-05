@@ -106,6 +106,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RESULTS: ${{ steps.validate.outputs.results }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cat > /tmp/comment.md << 'COMMENT_EOF'
           ## Skill Validation: REJECTED
@@ -128,12 +129,13 @@ jobs:
           *This PR cannot be merged until all critical issues are resolved.*
           COMMENT_EOF
           
-          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment.md
       
       - name: Comment on PR - NEEDS CHANGES
         if: steps.validate.outputs.worst_exit == '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cat > /tmp/comment.md << 'COMMENT_EOF'
           ## Skill Validation: NEEDS CHANGES
@@ -157,12 +159,13 @@ jobs:
           *These are fixable issues. Once resolved, this PR will be ready for human/AI review.*
           COMMENT_EOF
           
-          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment.md
       
       - name: Comment on PR - PASSED
         if: steps.validate.outputs.worst_exit == '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cat > /tmp/comment.md << 'COMMENT_EOF'
           ## Skill Validation: PASSED
@@ -178,23 +181,25 @@ jobs:
           *Automated validation passed. Awaiting maintainer review.*
           COMMENT_EOF
           
-          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment.md
       
       - name: Add labels
         if: steps.validate.outputs.result != 'no-changes'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORST_EXIT: ${{ steps.validate.outputs.worst_exit }}
         run: |
-          EXIT_CODE="${{ steps.validate.outputs.worst_exit }}"
+          EXIT_CODE="$WORST_EXIT"
           
-          gh pr edit ${{ github.event.pull_request.number }} --remove-label "validation-passed" 2>/dev/null || true
-          gh pr edit ${{ github.event.pull_request.number }} --remove-label "validation-needs-changes" 2>/dev/null || true
-          gh pr edit ${{ github.event.pull_request.number }} --remove-label "validation-rejected" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --remove-label "validation-passed" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --remove-label "validation-needs-changes" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --remove-label "validation-rejected" 2>/dev/null || true
           
           case "$EXIT_CODE" in
-            0) gh pr edit ${{ github.event.pull_request.number }} --add-label "validation-passed" 2>/dev/null || true ;;
-            1) gh pr edit ${{ github.event.pull_request.number }} --add-label "validation-needs-changes" 2>/dev/null || true ;;
-            2) gh pr edit ${{ github.event.pull_request.number }} --add-label "validation-rejected" 2>/dev/null || true ;;
+            0) gh pr edit "$PR_NUMBER" --add-label "validation-passed" 2>/dev/null || true ;;
+            1) gh pr edit "$PR_NUMBER" --add-label "validation-needs-changes" 2>/dev/null || true ;;
+            2) gh pr edit "$PR_NUMBER" --add-label "validation-rejected" 2>/dev/null || true ;;
           esac
       
       - name: Fail on rejection
