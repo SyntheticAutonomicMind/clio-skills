@@ -1,0 +1,28 @@
+# CLIO-specific files
+.clio/ltm.json
+.clio/.*.lock
+.clio/cache/
+skills/.clio/ltm.json
+skills/.clio/sessions/
+skills/.clio/logs/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Editor-specific
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.bak
+scratch/
+!.clio/instructions.md
+
+# CLIO (managed automatically)
+.clio/*
+!.clio/instructions.md

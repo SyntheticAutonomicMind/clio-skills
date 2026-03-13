@@ -1,0 +1,207 @@
+name: Validate Skills PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'skills/**'
+      - 'validate-skill.sh'
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Skill Changes
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for proper diff
+      
+      - name: Get changed skill directories
+        id: changed-skills
+        run: |
+          # Get list of changed files in skills/ directory
+          git diff --name-only origin/${{ github.base_ref }}..HEAD | grep '^skills/' | cut -d'/' -f1-3 | sort -u > /tmp/changed_dirs.txt
+          
+          # Filter to only actual skill directories (containing SKILL.md or LICENSE.txt)
+          SKILLS=""
+          while IFS= read -r dir; do
+            if [ -d "$dir" ]; then
+              SKILLS="$SKILLS $dir"
+            fi
+          done < /tmp/changed_dirs.txt
+          
+          echo "skills=$SKILLS" >> $GITHUB_OUTPUT
+          echo "Changed skill directories: $SKILLS"
+      
+      - name: Validate changed skills
+        id: validate
+        run: |
+          SKILLS="${{ steps.changed-skills.outputs.skills }}"
+          
+          if [ -z "$SKILLS" ]; then
+            echo "No skill directories changed in this PR"
+            echo "result=no-changes" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Track worst outcome across all skills
+          WORST_EXIT=0
+          RESULTS=""
+          
+          for skill in $SKILLS; do
+            echo ""
+            echo "========================================"
+            echo "Validating: $skill"
+            echo "========================================"
+            
+            # Run validator and capture exit code
+            ./validate-skill.sh "$skill" | tee "/tmp/${skill//\//_}_validation.log"
+            EXIT_CODE=${PIPESTATUS[0]}
+            
+            echo "Exit code for $skill: $EXIT_CODE"
+            
+            # Track worst result
+            if [ $EXIT_CODE -gt $WORST_EXIT ]; then
+              WORST_EXIT=$EXIT_CODE
+            fi
+            
+            # Build results summary
+            case $EXIT_CODE in
+              0) RESULTS="$RESULTS\n- ✅ **$skill**: PASSED" ;;
+              1) RESULTS="$RESULTS\n- ⚠️  **$skill**: NEEDS CHANGES" ;;
+              2) RESULTS="$RESULTS\n- ❌ **$skill**: REJECTED" ;;
+              *) RESULTS="$RESULTS\n- ❓ **$skill**: UNKNOWN ERROR" ;;
+            esac
+          done
+          
+          echo "worst_exit=$WORST_EXIT" >> $GITHUB_OUTPUT
+          echo "results<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$RESULTS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      
+      - name: Build validation logs
+        id: logs
+        if: steps.validate.outputs.result != 'no-changes'
+        run: |
+          SKILLS="${{ steps.changed-skills.outputs.skills }}"
+          mkdir -p /tmp/skill-logs
+          for skill in $SKILLS; do
+            log_file="/tmp/${skill//\//_}_validation.log"
+            if [ -f "$log_file" ]; then
+              cat "$log_file" >> /tmp/skill-logs/all_logs.txt
+              echo "---" >> /tmp/skill-logs/all_logs.txt
+            fi
+          done
+      
+      - name: Comment on PR - REJECTED
+        if: steps.validate.outputs.worst_exit == '2'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESULTS: ${{ steps.validate.outputs.results }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cat > /tmp/comment.md << 'COMMENT_EOF'
+          ## Skill Validation: REJECTED
+
+          This PR has been automatically rejected due to **critical validation failures**.
+
+          ### Critical Issues Found
+          One or more skills failed validation with critical errors such as:
+          - **Security vulnerabilities** (prompt injection, dangerous commands)
+          - **Missing required files** (SKILL.md, LICENSE.txt)
+          - **Hardcoded credentials or secrets**
+
+          ### What You Need To Do
+          1. Review the validation logs in the Actions tab
+          2. Fix **all critical issues** identified
+          3. Push your fixes to this PR
+          4. Validation will run automatically again
+
+          ---
+          *This PR cannot be merged until all critical issues are resolved.*
+          COMMENT_EOF
+          
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment.md
+      
+      - name: Comment on PR - NEEDS CHANGES
+        if: steps.validate.outputs.worst_exit == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cat > /tmp/comment.md << 'COMMENT_EOF'
+          ## Skill Validation: NEEDS CHANGES
+
+          This PR has validation issues that need to be fixed before it can be reviewed.
+
+          ### Issues Found
+          One or more skills have structural or formatting problems such as:
+          - Missing required frontmatter fields (name, description, version, author)
+          - Invalid semantic version format
+          - Name mismatch between directory and frontmatter
+          - Missing required sections (When to Use, Instructions)
+
+          ### What You Need To Do
+          1. Review the validation logs in the Actions tab
+          2. Fix the identified structural/format issues
+          3. Push your fixes to this PR
+          4. Validation will run automatically again
+
+          ---
+          *These are fixable issues. Once resolved, this PR will be ready for human/AI review.*
+          COMMENT_EOF
+          
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment.md
+      
+      - name: Comment on PR - PASSED
+        if: steps.validate.outputs.worst_exit == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cat > /tmp/comment.md << 'COMMENT_EOF'
+          ## Skill Validation: PASSED
+
+          All skills in this PR have passed automated validation!
+
+          ### Next Steps
+          This PR is ready for:
+          - **Human review** - A maintainer will review the skill content, quality, and usefulness
+          - **AI review** (optional) - May be flagged for CLIO-assisted review for experimental skills
+
+          ---
+          *Automated validation passed. Awaiting maintainer review.*
+          COMMENT_EOF
+          
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment.md
+      
+      - name: Add labels
+        if: steps.validate.outputs.result != 'no-changes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORST_EXIT: ${{ steps.validate.outputs.worst_exit }}
+        run: |
+          EXIT_CODE="$WORST_EXIT"
+          
+          gh pr edit "$PR_NUMBER" --remove-label "validation-passed" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --remove-label "validation-needs-changes" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --remove-label "validation-rejected" 2>/dev/null || true
+          
+          case "$EXIT_CODE" in
+            0) gh pr edit "$PR_NUMBER" --add-label "validation-passed" 2>/dev/null || true ;;
+            1) gh pr edit "$PR_NUMBER" --add-label "validation-needs-changes" 2>/dev/null || true ;;
+            2) gh pr edit "$PR_NUMBER" --add-label "validation-rejected" 2>/dev/null || true ;;
+          esac
+      
+      - name: Fail on rejection
+        if: steps.validate.outputs.worst_exit == '2'
+        run: exit 1
