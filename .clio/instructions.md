@@ -328,7 +328,7 @@ Skills can reference CLIO's available tools. When writing skill instructions, us
 - `web_operations` - Web fetch and search
 - `todo_operations` - Task management
 - `code_intelligence` - Code analysis
-- `user_collaboration` - User interaction
+- `interact` - Session interaction
 
 ---
 

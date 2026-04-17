@@ -3,7 +3,7 @@ name: "llama-cpp-steamos"
 description: "Install and optimize llama.cpp on SteamOS/SteamFork with AMD APU Vulkan acceleration (battle-tested)"
 version: "1.1.0"
 author: "Andrew Wyatt (Fewtarius)"
-tools: ["terminal_operations", "file_operations", "user_collaboration"]
+tools: ["terminal_operations", "file_operations", "interact"]
 ---
 
 # llama.cpp Installation for SteamOS/SteamFork (AMD APU)
@@ -87,7 +87,7 @@ df -h /home
 
 **CHECKPOINT: Analyze RAM and propose VRAM allocation**
 
-Use user_collaboration to present findings and get approval:
+Use interact to present findings and get approval:
 
 ```
 System Analysis:
@@ -232,7 +232,7 @@ git log -1 --oneline
 
 **CHECKPOINT: Before building, confirm build configuration:**
 
-Use user_collaboration to show:
+Use interact to show:
 ```
 Build Configuration:
 - Vulkan: ENABLED (primary acceleration)
@@ -337,7 +337,7 @@ ttm_value = (target_GTT_GB * 1024 * 1024) / 4
 
 **CHECKPOINT: Before modifying GRUB, confirm with user:**
 
-Use user_collaboration:
+Use interact:
 ```
 Kernel Parameter Changes Required:
 - rocm.allowed_devices=3 (enables consumer GPU support for gfx1103)
@@ -508,7 +508,7 @@ huggingface-cli download \
 
 **CHECKPOINT: Before running first test:**
 
-Use user_collaboration:
+Use interact:
 ```
 Test Configuration:
 - Model: [model name] (~[size]GB)
